@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   spark-master:
     image: bitnami/spark:3.5.1
@@ -9,7 +7,7 @@ services:
       - "7077:7077"
     environment:
       - SPARK_MODE=master
-      - SPARK_DAEMON_MEMORY=4g
+      - SPARK_DAEMON_MEMORY=${SPARK_DAEMON_MEMORY}
     volumes:
       - ./data:/app/data
 
@@ -22,7 +20,8 @@ services:
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=4g
+      - SPARK_WORKER_CORES=${SPARK_WORKER_CORES}
+      - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY}
     depends_on:
       - spark-master
     volumes:
@@ -34,6 +33,12 @@ services:
     container_name: clustering-app
     ports:
       - "4040:4040"
+    environment:
+      - SPARK_DRIVER_MEMORY=${SPARK_DRIVER_MEMORY}
+      - SPARK_EXECUTOR_MEMORY=${SPARK_EXECUTOR_MEMORY}
+      - SPARK_EXECUTOR_CORES=${SPARK_EXECUTOR_CORES}
+      - SPARK_DEFAULT_PARALLELISM=${SPARK_DEFAULT_PARALLELISM}
+      - SPARK_SQL_SHUFFLE_PARTITIONS=${SPARK_SQL_SHUFFLE_PARTITIONS}
     depends_on:
       - spark-master
     volumes:
@@ -43,7 +48,6 @@ services:
       /bin/bash -c "pip install numpy && \
       spark-submit 
       --master spark://spark-master:7077 
-      --executor-memory 4g 
       /app/scripts/clustering.py 
       -i /app/data/en.openfoodfacts.org.products.csv 
       -o /app/data/cluster_results 
@@ -51,17 +55,17 @@ services:
       --min_unique 0.3 
       -v"
 
-  # word-count-runner:
-  #   image: bitnami/spark:3.5.1
-  #   container_name: word-count-runner
-  #   depends_on:
-  #     - spark-master
-  #   volumes:
-  #     - ./data:/app/data
-  #     - ./scripts:/app/scripts
-  #   command: >
-  #     /bin/bash -c "spark-submit 
-  #     --master spark://spark-master:7077 
-  #     /app/scripts/word_count.py 
-  #     -i /app/data/sample_text.txt 
-  #     -o /app/data/output"
+  word-count-runner:
+    image: bitnami/spark:3.5.1
+    container_name: word-count-runner
+    depends_on:
+      - spark-master
+    volumes:
+      - ./data:/app/data
+      - ./scripts:/app/scripts
+    command: >
+      /bin/bash -c "spark-submit 
+      --master spark://spark-master:7077 
+      /app/scripts/word_count.py 
+      -i /app/data/sample_text.txt 
+      -o /app/data/output"

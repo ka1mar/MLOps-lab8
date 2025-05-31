@@ -4,6 +4,7 @@ from pyspark.ml.clustering import KMeans
 from pyspark.sql.functions import col, count, when, isnan
 from pyspark.sql.types import NumericType
 import numpy as np
+import os
 import logging
 import argparse
 
@@ -19,6 +20,11 @@ class AutoClusteringPipeline:
 
     def _init_spark(self):
         return SparkSession.builder \
+            .config("spark.executor.cores", os.getenv('SPARK_EXECUTOR_CORES'))  \
+            .config("spark.driver.memory", os.getenv('SPARK_DRIVER_MEMORY')) \
+            .config("spark.executor.memory", os.getenv('SPARK_EXECUTOR_MEMORY')) \
+            .config("spark.default.parallelism", os.getenv('SPARK_DEFAULT_PARALLELISM')) \
+            .config("spark.sql.shuffle.partitions", os.getenv('SPARK_SQL_SHUFFLE_PARTITIONS')) \
             .appName("AutoClustering") \
             .getOrCreate()
 
