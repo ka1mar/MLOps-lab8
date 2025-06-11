@@ -76,7 +76,6 @@ class AutoClusteringPipeline:
            missing = df.filter(col(col_name).isNull() | isnan(col(col_name))).count()
            missing_ratio = missing / total_count
 
-
            # Проверка на минимальное количество уникальных значений
            unique_count = df.select(col_name).distinct().count()
            unique_ratio = unique_count / total_count
@@ -95,7 +94,6 @@ class AutoClusteringPipeline:
    def load_and_preprocess(self):
        # Загрузка данных из ClickHouse
        df = self._read_from_clickhouse()
-       df = df.cache()
       
        # Определение числовых колонок
        numeric_cols = self._find_numeric_columns(df)
@@ -108,7 +106,7 @@ class AutoClusteringPipeline:
       
        if not self.numeric_columns:
            raise ValueError("Нет колонок, удовлетворяющих критериям качества данных")
-      
+
        # Обработка пропусков
        imputer = Imputer(
            inputCols=self.numeric_columns,

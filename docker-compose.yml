@@ -90,7 +90,7 @@ services:
       --output_table predicts 
       -o /app/data/cluster_results
       --max_missing 0.3 
-      --min_unique 0.3 
+      --min_unique 0.001
       -v"
 
 networks:
