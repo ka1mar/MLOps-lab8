@@ -45,10 +45,11 @@ class AutoClusteringPipeline:
 
 
    def load_and_preprocess(self):
-       jdf = self.data_mart.readProcessedData(self.input_table)
-       df = self.spark._jsparkSession.sqlContext().createDataFrame(jdf, self.spark._jsparkSession)
+       self.data_mart.readProcessedData(self.input_table)
+       df = self.spark.sql(f"SELECT * FROM {self.input_table}_processed")
        self.numeric_columns = df.columns
        return df
+
 
 
    def feature_engineering(self, df):
@@ -79,7 +80,7 @@ class AutoClusteringPipeline:
    def save_results(self, model, df):
        results = model.transform(df).select("prediction", *self.numeric_columns)
        self.data_mart.writeResults(results._jdf, self.output_table)
-       model.save(f"{self.output_path}/model")
+       model.write().overwrite().save(f"{self.output_path}/model")
 
 
    def run(self):

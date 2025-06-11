@@ -23,8 +23,11 @@ class DataMart(
       .option("password", jdbcPassword)
       .load()
     
-    preprocessData(rawDF)
-  }
+    val processedDF = preprocessData(rawDF)
+    processedDF.createOrReplaceTempView(s"${table}_processed")
+    processedDF
+}
+
 
   def writeResults(df: DataFrame, table: String): Unit = {
     val cleanedDF = postprocessData(df)
