@@ -17,103 +17,38 @@ class AutoClusteringPipeline:
        self.max_missing = max_missing
        self.min_unique = min_unique
        self.spark = self._init_spark()
+       self.data_mart = self._init_data_mart()
        self.numeric_columns = []
        self.logger = logging.getLogger(self.__class__.__name__)
 
 
    def _init_spark(self):
-       return SparkSession.builder \
-           .config("spark.executor.cores", os.getenv('SPARK_EXECUTOR_CORES'))  \
-           .config("spark.driver.memory", os.getenv('SPARK_DRIVER_MEMORY')) \
-           .config("spark.executor.memory", os.getenv('SPARK_EXECUTOR_MEMORY')) \
-           .config("spark.default.parallelism", os.getenv('SPARK_DEFAULT_PARALLELISM')) \
-           .config("spark.sql.shuffle.partitions", os.getenv('SPARK_SQL_SHUFFLE_PARTITIONS')) \
-           .config("spark.jars.packages", "com.clickhouse:clickhouse-jdbc:0.4.6,com.clickhouse:clickhouse-http-client:0.4.6,org.apache.httpcomponents.client5:httpclient5:5.2.1") \
-           .appName("AutoClustering") \
-           .getOrCreate()
+        return SparkSession.builder \
+            .config("spark.executor.cores", os.getenv('SPARK_EXECUTOR_CORES'))  \
+            .config("spark.driver.memory", os.getenv('SPARK_DRIVER_MEMORY')) \
+            .config("spark.executor.memory", os.getenv('SPARK_EXECUTOR_MEMORY')) \
+            .config("spark.default.parallelism", os.getenv('SPARK_DEFAULT_PARALLELISM')) \
+            .config("spark.sql.shuffle.partitions", os.getenv('SPARK_SQL_SHUFFLE_PARTITIONS')) \
+            .config("spark.jars", "/app/jars/mysql-connector-java-8.0.33.jar") \
+            .config("spark.driver.extraClassPath", "/app/jars/mysql-connector-java-8.0.33.jar") \
+            .appName("AutoClustering") \
+            .getOrCreate()
 
 
-   def _read_from_clickhouse(self):
-       return self.spark.read \
-           .format("jdbc") \
-           .option("driver", "com.clickhouse.jdbc.ClickHouseDriver") \
-           .option("url", os.getenv('CLICKHOUSE_URL')) \
-           .option("user", os.getenv('CLICKHOUSE_USER')) \
-           .option("password", os.getenv('CLICKHOUSE_PASSWORD')) \
-           .option("dbtable", self.input_table) \
-           .load()
-
-
-   def _write_to_clickhouse(self, df):
-        df.write \
-            .format("jdbc") \
-            .option("driver", "com.clickhouse.jdbc.ClickHouseDriver") \
-            .option("url", os.getenv('CLICKHOUSE_URL')) \
-            .option("user", os.getenv('CLICKHOUSE_USER')) \
-            .option("password", os.getenv('CLICKHOUSE_PASSWORD')) \
-            .option("dbtable", self.output_table) \
-            .option("truncate", "false") \
-            .mode("append") \
-            .save()
-
-
-   def _find_numeric_columns(self, df):
-       numeric_cols = [
-           field.name for field in df.schema.fields
-           if isinstance(field.dataType, NumericType)
-       ]
-      
-       self.logger.info(f"Найдены числовые колонки: {numeric_cols}")
-       return numeric_cols
-
-
-   def _filter_columns(self, df, numeric_cols):
-       total_count = df.count()
-       filtered_cols = []
-      
-       for col_name in numeric_cols:
-           # Проверка на количество пропущенных значений
-           missing = df.filter(col(col_name).isNull() | isnan(col(col_name))).count()
-           missing_ratio = missing / total_count
-
-           # Проверка на минимальное количество уникальных значений
-           unique_count = df.select(col_name).distinct().count()
-           unique_ratio = unique_count / total_count
-          
-           if missing_ratio < self.max_missing and unique_ratio >= self.min_unique:
-               filtered_cols.append(col_name)
-               self.logger.info(f"Колонка {col_name} прошла фильтрацию: "
-                               f"пропуски={missing_ratio:.1%}, уникальные={unique_ratio:.1%}")
-           else:
-               self.logger.warning(f"Исключена колонка {col_name}: "
-                                 f"пропуски={missing_ratio:.1%}, уникальные={unique_ratio:.1%}")
-      
-       return filtered_cols
+   def _init_data_mart(self):
+       DataMart = self.spark._jvm.com.foodfacts.datamart.DataMart
+       return DataMart(
+           self.spark._jsparkSession,
+           float(self.max_missing),
+           float(self.min_unique)
+       )
 
 
    def load_and_preprocess(self):
-       # Загрузка данных из ClickHouse
-       df = self._read_from_clickhouse()
-      
-       # Определение числовых колонок
-       numeric_cols = self._find_numeric_columns(df)
-      
-       if not numeric_cols:
-           raise ValueError("В данных отсутствуют числовые колонки для анализа")
-      
-       # Фильтрация колонок - передаем полный DataFrame вместо df.select(numeric_cols)
-       self.numeric_columns = self._filter_columns(df, numeric_cols)
-      
-       if not self.numeric_columns:
-           raise ValueError("Нет колонок, удовлетворяющих критериям качества данных")
-
-       # Обработка пропусков
-       imputer = Imputer(
-           inputCols=self.numeric_columns,
-           outputCols=self.numeric_columns
-       ).setStrategy("mean")
-      
-       return imputer.fit(df).transform(df).select(self.numeric_columns)
+       jdf = self.data_mart.readProcessedData(self.input_table)
+       df = self.spark._jsparkSession.sqlContext().createDataFrame(jdf, self.spark._jsparkSession)
+       self.numeric_columns = df.columns
+       return df
 
 
    def feature_engineering(self, df):
@@ -122,9 +57,7 @@ class AutoClusteringPipeline:
            outputCol="raw_features"
        )
 
-
        assembled_df = assembler.transform(df)
-
 
        scaler = StandardScaler(
            inputCol="raw_features",
@@ -133,10 +66,8 @@ class AutoClusteringPipeline:
            withMean=True
        )
 
-
        scaled_df = scaler.fit(assembled_df).transform(assembled_df)
        scaled_df.show(10)
-
 
        return scaled_df
 
@@ -147,8 +78,7 @@ class AutoClusteringPipeline:
 
    def save_results(self, model, df):
        results = model.transform(df).select("prediction", *self.numeric_columns)
-       self._write_to_clickhouse(results.limit(20))
-      
+       self.data_mart.writeResults(results._jdf, self.output_table)
        model.save(f"{self.output_path}/model")
 
 
@@ -174,9 +104,9 @@ class AutoClusteringConfig:
   
    def _setup_arguments(self):
        self.parser.add_argument("--input_table", required=True,
-                              help="Имя таблицы в ClickHouse для чтения данных")
+                              help="Имя таблицы в MySQL для чтения данных")
        self.parser.add_argument("--output_table", required=True,
-                              help="Имя таблицы в ClickHouse для сохранения результатов")
+                              help="Имя таблицы в MySQL для сохранения результатов")
        self.parser.add_argument("-o", "--output", required=True,
                               help="Директория для сохранения весов модели")
        self.parser.add_argument("--max_missing", type=float, default=0.3,

@@ -1,27 +1,26 @@
 services:
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.4
-    container_name: clickhouse
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "3306:3306"
     volumes:
-      - ./clickhouse_data:/var/lib/clickhouse
+      - ./mysql_data:/var/lib/mysql
       - ./init_scripts:/docker-entrypoint-initdb.d
-      - ./data:/var/lib/clickhouse/user_files
+      - ./data:/var/lib/mysql-files
     environment:
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - FILE_NAME=${FILE_NAME}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: foodfacts
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_LOCAL_INFILE: 1
+      FILE_NAME: ${FILE_NAME}
     networks:
       - spark-network
     healthcheck:
-      test: ["CMD", "clickhouse-client", 
-             "--user", "${CLICKHOUSE_USER}", 
-             "--password", "${CLICKHOUSE_PASSWORD}", 
-             "-q", "SELECT count() FROM foodfacts.predicts"]
+      test: ["CMD-SHELL", "mysqladmin ping -u root -p${MYSQL_ROOT_PASSWORD}"]
       interval: 20s
-      timeout: 3s0s
+      timeout: 30s
       retries: 20
       start_period: 40s
 
@@ -57,23 +56,25 @@ services:
       - spark-network
 
   clustering-app:
-    image: bitnami/spark:3.5.1
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: clustering-app
-    ports:
-      - "4040:4040"
+    ports: 
+      - 4040:4040
     environment:
       - SPARK_DRIVER_MEMORY=${SPARK_DRIVER_MEMORY}
       - SPARK_EXECUTOR_MEMORY=${SPARK_EXECUTOR_MEMORY}
       - SPARK_EXECUTOR_CORES=${SPARK_EXECUTOR_CORES}
       - SPARK_DEFAULT_PARALLELISM=${SPARK_DEFAULT_PARALLELISM}
       - SPARK_SQL_SHUFFLE_PARTITIONS=${SPARK_SQL_SHUFFLE_PARTITIONS}
-      - CLICKHOUSE_URL=jdbc:clickhouse://clickhouse:8123/foodfacts
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - MYSQL_URL=jdbc:mysql://mysql:3306/foodfacts
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
     depends_on:
       spark-master:
         condition: service_started
-      clickhouse:
+      mysql:
         condition: service_healthy
     volumes:
       - ./data:/app/data
@@ -81,17 +82,19 @@ services:
     networks:
       - spark-network
     command: >
-      /bin/bash -c "pip install numpy clickhouse-driver && 
-      spark-submit 
-      --packages com.clickhouse:clickhouse-jdbc:0.4.6,com.clickhouse:clickhouse-http-client:0.4.6,org.apache.httpcomponents.client5:httpclient5:5.2.1 
-      --master spark://spark-master:7077 
-      /app/scripts/clustering.py 
-      --input_table products 
-      --output_table predicts 
+      /bin/bash -c "
+      spark-submit
+      --jars /app/jars/datamart.jar,/app/jars/mysql-connector-java-8.0.33.jar \
+      --packages com.mysql:mysql-connector-j:8.0.33 \
+      --master spark://spark-master:7077
+      /app/scripts/clustering.py
+      --input_table products
+      --output_table predicts
       -o /app/data/cluster_results
-      --max_missing 0.3 
+      --max_missing 0.3
       --min_unique 0.001
       -v"
+
 
 networks:
   spark-network:
