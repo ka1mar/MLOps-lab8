@@ -96,6 +96,12 @@ class AutoClusteringPipeline:
        # Загрузка данных из ClickHouse
        df = self._read_from_clickhouse()
 
+       df = df.cache()
+        
+       # Форсируем выполнение для проверки подключения
+       count = df.count()
+       self.logger.info(f"Успешно загружено {count} записей из таблицы {self.input_table}")
+      
        # Определение числовых колонок
        numeric_cols = self._find_numeric_columns(df)
       
