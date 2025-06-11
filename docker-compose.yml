@@ -18,10 +18,10 @@ services:
     networks:
       - spark-network
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -u root -p${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "mysql -u root -p$${MYSQL_ROOT_PASSWORD} -D foodfacts -e \"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'foodfacts' AND table_name = 'predicts'\" | grep -q 1"]
       interval: 20s
       timeout: 30s
-      retries: 20
+      retries: 30
       start_period: 40s
 
   spark-master:

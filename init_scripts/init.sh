@@ -411,24 +411,5 @@ mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
 CREATE TABLE IF NOT EXISTS predicts LIKE products;
 EOF
 
-echo "Checking column stats..."
-mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts -N -e \
-"SELECT COLUMN_NAME, DATA_TYPE 
-FROM INFORMATION_SCHEMA.COLUMNS 
-WHERE TABLE_SCHEMA = 'foodfacts' 
-  AND TABLE_NAME = 'products'" | while read -r column type; do
-
-  echo -n "Column: ${column} (${type}) "
-  
-  distinct_count=$(mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts -N -B -e \
-    "SELECT COUNT(DISTINCT \`${column}\`) FROM products")
-  
-  echo -n "| Distinct: ${distinct_count} "
-  
-  non_null=$(mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts -N -B -e \
-    "SELECT COUNT(\`${column}\`) FROM products")
-  
-  echo "| Non-null: ${non_null}"
-done
 
 echo "Initialization completed!"
