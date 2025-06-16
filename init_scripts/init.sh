@@ -2,15 +2,22 @@
 
 set -e
 
-MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}"
-MYSQL_USER="${MYSQL_USER}"
-MYSQL_PASSWORD="${MYSQL_PASSWORD}"
-FILE_NAME="${FILE_NAME:-en.openfoodfacts.org.products.csv}"
-DATA_DIR="/var/lib/mysql-files"
-FULL_PATH="${DATA_DIR}/${FILE_NAME}"
+main() {
+  MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}"
+  MYSQL_USER="${MYSQL_USER}"
+  MYSQL_PASSWORD="${MYSQL_PASSWORD}"
+  FILE_NAME="${FILE_NAME}"
+  DATA_DIR="/var/lib/mysql-files"
+  FULL_PATH="${DATA_DIR}/${FILE_NAME}"
 
-echo "Creating database and user..."
-mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
+  # Wait for MySQL to be truly ready
+  echo "Waiting for MySQL connection..."
+  while ! mysqladmin ping -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; do
+    sleep 1
+  done
+
+  echo "Creating database and user..."
+  mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
 CREATE DATABASE IF NOT EXISTS foodfacts;
 DROP USER IF EXISTS '${MYSQL_USER}'@'%';
 CREATE USER '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
@@ -18,8 +25,8 @@ GRANT ALL PRIVILEGES ON foodfacts.* TO '${MYSQL_USER}'@'%';
 FLUSH PRIVILEGES;
 EOF
 
-echo "Creating products table..."
-mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
+  echo "Creating products table..."
+  mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
 CREATE TABLE IF NOT EXISTS products (
    code VARCHAR(255),
    url TEXT,
@@ -225,8 +232,8 @@ CREATE TABLE IF NOT EXISTS products (
 ) ENGINE=InnoDB;
 EOF
 
-echo "Importing data..."
-mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
+  echo "Importing data..."
+  mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
 SET SESSION sql_mode = '';
 LOAD DATA INFILE '${FULL_PATH}'
 INTO TABLE products
@@ -406,10 +413,13 @@ SET
   prediction = NULLIF(@prediction, '');
 EOF
 
-echo "Creating predicts table..."
-mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
+  echo "Creating predicts table..."
+  mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
 CREATE TABLE IF NOT EXISTS predicts LIKE products;
 EOF
 
 
-echo "Initialization completed!"
+  echo "Initialization completed!"
+}
+
+main "$@"

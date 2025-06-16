@@ -1,0 +1,170 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foodfacts
+
+---
+
+# MySQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: foodfacts
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+
+---
+
+# MySQL Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: foodfacts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "${MYSQL_ROOT_PASSWORD}"
+        - name: MYSQL_DATABASE
+          value: "${MYSQL_DATABASE}"
+        - name: MYSQL_USER
+          value: "${MYSQL_USER}"
+        - name: MYSQL_PASSWORD
+          value: "${MYSQL_PASSWORD}"
+        - name: FILE_NAME
+          value: "${FILE_NAME}"
+        readinessProbe:
+          exec:
+            command: ["mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: data-volume
+          mountPath: /var/lib/mysql-files
+      volumes:
+      - name: data-volume
+        hostPath:
+          path: /Users/anmilka/mlops/MLOps-lab8/data
+          type: DirectoryOrCreate
+
+---
+
+# Spark Master
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-master
+  namespace: foodfacts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-master
+  template:
+    metadata:
+      labels:
+        app: spark-master
+    spec:
+      containers:
+      - name: spark-master
+        image: bitnami/spark:3.5.1
+        env:
+        - name: SPARK_MODE
+          value: "master"
+        - name: SPARK_DAEMON_MEMORY
+          value: "${SPARK_DAEMON_MEMORY}"
+        - name: SPARK_DRIVER_MEMORY
+          value: "${SPARK_DRIVER_MEMORY}"
+        ports:
+        - containerPort: 7077
+        - containerPort: 8080
+
+---
+
+# Spark Worker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-worker
+  namespace: foodfacts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-worker
+  template:
+    metadata:
+      labels:
+        app: spark-worker
+    spec:
+      containers:
+      - name: spark-worker
+        image: bitnami/spark:3.5.1
+        env:
+        - name: SPARK_MODE
+          value: "worker"
+        - name: SPARK_MASTER_URL
+          value: "spark://spark-master:7077"
+        - name: SPARK_WORKER_CORES
+          value: "${SPARK_WORKER_CORES}"
+        - name: SPARK_WORKER_MEMORY
+          value: "${SPARK_WORKER_MEMORY}"
+
+---
+
+# Clustering Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clustering-job
+  namespace: foodfacts
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 60
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      containers:
+      - name: clustering-app
+        image: ka1mar/clustering-app:v1
+        env:
+        - name: MYSQL_URL
+          value: "jdbc:mysql://mysql:3306/${MYSQL_DATABASE}"
+        - name: MYSQL_USER
+          value: "${MYSQL_USER}"
+        - name: MYSQL_PASSWORD
+          value: "${MYSQL_PASSWORD}"
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            spark-submit \
+            --master spark://spark-master:7077 \
+            --driver-memory ${SPARK_DRIVER_MEMORY} \
+            --executor-memory ${SPARK_EXECUTOR_MEMORY} \
+            /app/scripts/clustering.py \
+            --input_table products \
+            --output_table predicts \
+            -o /app/data/cluster_results \
+            --max_missing 0.3 \
+            --min_unique 0.001 \
+            -v
+      restartPolicy: Never
