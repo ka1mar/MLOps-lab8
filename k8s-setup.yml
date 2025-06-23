@@ -50,6 +50,9 @@ spec:
           value: "${MYSQL_PASSWORD}"
         - name: FILE_NAME
           value: "${FILE_NAME}"
+        - name: SELECTED_COLUMNS
+          value: "${SELECTED_COLUMNS}"
+
         readinessProbe:
           exec:
             command: ["mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]

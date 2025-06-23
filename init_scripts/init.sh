@@ -2,22 +2,93 @@
 
 set -e
 
-main() {
-  MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}"
-  MYSQL_USER="${MYSQL_USER}"
-  MYSQL_PASSWORD="${MYSQL_PASSWORD}"
-  FILE_NAME="${FILE_NAME}"
-  DATA_DIR="/var/lib/mysql-files"
-  FULL_PATH="${DATA_DIR}/${FILE_NAME}"
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}"
+MYSQL_USER="${MYSQL_USER}"
+MYSQL_PASSWORD="${MYSQL_PASSWORD}"
+FILE_NAME="${FILE_NAME:-en.openfoodfacts.org.products.csv}"
+DATA_DIR="/var/lib/mysql-files"
+FULL_PATH="${DATA_DIR}/${FILE_NAME}"
+SELECTED_COLUMNS="${SELECTED_COLUMNS}"
 
-  # Wait for MySQL to be truly ready
-  echo "Waiting for MySQL connection..."
-  while ! mysqladmin ping -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; do
-    sleep 1
-  done
+# Проверяем наличие SELECTED_COLUMNS
+if [ -z "$SELECTED_COLUMNS" ]; then
+    echo "ERROR: SELECTED_COLUMNS environment variable is not set." >&2
+    exit 1
+fi
 
-  echo "Creating database and user..."
-  mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
+# Читаем заголовок из CSV-файла
+if [ ! -f "$FULL_PATH" ]; then
+    echo "ERROR: CSV file $FULL_PATH not found." >&2
+    exit 1
+fi
+
+# Получаем заголовок файла
+HEADER=$(head -1 "$FULL_PATH")
+IFS=$'\t' read -r -a ALL_COLUMNS <<< "$HEADER"
+
+# Создаем массив с безопасными именами колонок (заменяем дефисы на подчеркивания)
+SAFE_COLUMNS=()
+for col in "${ALL_COLUMNS[@]}"; do
+    safe_col=$(echo "$col" | tr '-' '_')
+    SAFE_COLUMNS+=("$safe_col")
+done
+
+# Обрабатываем выбранные колонки
+IFS=' ' read -r -a selected_columns <<< "$SELECTED_COLUMNS"
+selected_columns+=("code")
+selected_columns=($(printf "%s\n" "${selected_columns[@]}" | sort -u))
+
+# Функция для экранирования имен колонок
+escape_column() {
+    echo "\`$1\`"
+}
+
+# Генерируем SQL для создания таблиц
+generate_table_sql() {
+    local table_name=$1
+    local columns=("${@:2}")
+    
+    if [ ${#columns[@]} -eq 0 ]; then
+        echo "ERROR: No columns defined for table $table_name" >&2
+        exit 1
+    fi
+    
+    local sql="CREATE TABLE IF NOT EXISTS ${table_name} ("
+    for col in "${columns[@]}"; do
+        if [ "$col" == "code" ]; then
+            sql+="$(escape_column "$col") VARCHAR(255)"
+        else
+            sql+="$(escape_column "$col") FLOAT"
+        fi
+        sql+=", "
+    done
+    sql="${sql%, });"
+    echo "$sql"
+}
+
+# Генерируем список колонок для LOAD DATA
+generate_load_list() {
+    local load_list=""
+    for safe_col in "${SAFE_COLUMNS[@]}"; do
+        load_list+="@${safe_col}, "
+    done
+    echo "${load_list%, }"
+}
+
+# Генерируем SET-выражения для преобразования данных
+generate_set_expr() {
+    local set_expr=""
+    for col in "${selected_columns[@]}"; do
+        # Преобразуем имя колонки для SET (заменяем дефисы на подчеркивания)
+        safe_col=$(echo "$col" | tr '-' '_')
+        escaped_col=$(escape_column "$col")
+        set_expr+="$escaped_col = NULLIF(@${safe_col}, ''), "
+    done
+    echo "${set_expr%, }"
+}
+
+echo "Creating database and user..."
+mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
 CREATE DATABASE IF NOT EXISTS foodfacts;
 DROP USER IF EXISTS '${MYSQL_USER}'@'%';
 CREATE USER '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
@@ -25,215 +96,17 @@ GRANT ALL PRIVILEGES ON foodfacts.* TO '${MYSQL_USER}'@'%';
 FLUSH PRIVILEGES;
 EOF
 
-  echo "Creating products table..."
-  mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
-CREATE TABLE IF NOT EXISTS products (
-   code VARCHAR(255),
-   url TEXT,
-   creator TEXT,
-   last_modified_by TEXT,
-   product_name TEXT,
-   abbreviated_product_name TEXT,
-   generic_name TEXT,
-   quantity TEXT,
-   packaging TEXT,
-   packaging_tags TEXT,
-   packaging_en TEXT,
-   packaging_text TEXT,
-   brands TEXT,
-   brands_tags TEXT,
-   brands_en TEXT,
-   categories TEXT,
-   categories_tags TEXT,
-   categories_en TEXT,
-   origins TEXT,
-   origins_tags TEXT,
-   origins_en TEXT,
-   manufacturing_places TEXT,
-   manufacturing_places_tags TEXT,
-   labels TEXT,
-   labels_tags TEXT,
-   labels_en TEXT,
-   emb_codes TEXT,
-   emb_codes_tags TEXT,
-   first_packaging_code_geo TEXT,
-   cities TEXT,
-   cities_tags TEXT,
-   purchase_places TEXT,
-   stores TEXT,
-   countries TEXT,
-   countries_tags TEXT,
-   countries_en TEXT,
-   ingredients_text TEXT,
-   ingredients_tags TEXT,
-   ingredients_analysis_tags TEXT,
-   allergens TEXT,
-   allergens_en TEXT,
-   traces TEXT,
-   traces_tags TEXT,
-   traces_en TEXT,
-   serving_size TEXT,
-   serving_quantity FLOAT NULL,
-   no_nutrition_data TEXT,
-   additives_n INT NULL,
-   additives TEXT,
-   additives_tags TEXT,
-   nutriscore_score INT NULL,
-   nutriscore_grade TEXT,
-   nova_group INT NULL,
-   pnns_groups_1 TEXT,
-   pnns_groups_2 TEXT,
-   food_groups TEXT,
-   food_groups_tags TEXT,
-   food_groups_en TEXT,
-   states TEXT,
-   states_tags TEXT,
-   states_en TEXT,
-   brand_owner TEXT,
-   environmental_score_score FLOAT NULL,
-   environmental_score_grade TEXT,
-   nutrient_levels_tags TEXT,
-   product_quantity TEXT,
-   owner TEXT,
-   data_quality_errors_tags TEXT,
-   unique_scans_n INT NULL,
-   popularity_tags TEXT,
-   completeness FLOAT NULL,
-   main_category TEXT,
-   main_category_en TEXT,
-   image_url TEXT,
-   image_small_url TEXT,
-   image_ingredients_url TEXT,
-   image_ingredients_small_url TEXT,
-   image_nutrition_url TEXT,
-   image_nutrition_small_url TEXT,
-   energy_kj_100g FLOAT NULL,
-   energy_kcal_100g FLOAT NULL,
-   energy_100g FLOAT NULL,
-   energy_from_fat_100g FLOAT NULL,
-   fat_100g FLOAT NULL,
-   saturated_fat_100g FLOAT NULL,
-   butyric_acid_100g FLOAT NULL,
-   caproic_acid_100g FLOAT NULL,
-   caprylic_acid_100g FLOAT NULL,
-   capric_acid_100g FLOAT NULL,
-   lauric_acid_100g FLOAT NULL,
-   myristic_acid_100g FLOAT NULL,
-   palmitic_acid_100g FLOAT NULL,
-   stearic_acid_100g FLOAT NULL,
-   arachidic_acid_100g FLOAT NULL,
-   behenic_acid_100g FLOAT NULL,
-   lignoceric_acid_100g FLOAT NULL,
-   cerotic_acid_100g FLOAT NULL,
-   montanic_acid_100g FLOAT NULL,
-   melissic_acid_100g FLOAT NULL,
-   unsaturated_fat_100g FLOAT NULL,
-   monounsaturated_fat_100g FLOAT NULL,
-   omega_9_fat_100g FLOAT NULL,
-   polyunsaturated_fat_100g FLOAT NULL,
-   omega_3_fat_100g FLOAT NULL,
-   omega_6_fat_100g FLOAT NULL,
-   alpha_linolenic_acid_100g FLOAT NULL,
-   eicosapentaenoic_acid_100g FLOAT NULL,
-   docosahexaenoic_acid_100g FLOAT NULL,
-   linoleic_acid_100g FLOAT NULL,
-   arachidonic_acid_100g FLOAT NULL,
-   gamma_linolenic_acid_100g FLOAT NULL,
-   dihomo_gamma_linolenic_acid_100g FLOAT NULL,
-   oleic_acid_100g FLOAT NULL,
-   elaidic_acid_100g FLOAT NULL,
-   gondoic_acid_100g FLOAT NULL,
-   mead_acid_100g FLOAT NULL,
-   erucic_acid_100g FLOAT NULL,
-   nervonic_acid_100g FLOAT NULL,
-   trans_fat_100g FLOAT NULL,
-   cholesterol_100g FLOAT NULL,
-   carbohydrates_100g FLOAT NULL,
-   sugars_100g FLOAT NULL,
-   added_sugars_100g FLOAT NULL,
-   sucrose_100g FLOAT NULL,
-   glucose_100g FLOAT NULL,
-   fructose_100g FLOAT NULL,
-   galactose_100g FLOAT NULL,
-   lactose_100g FLOAT NULL,
-   maltose_100g FLOAT NULL,
-   maltodextrins_100g FLOAT NULL,
-   starch_100g FLOAT NULL,
-   polyols_100g FLOAT NULL,
-   erythritol_100g FLOAT NULL,
-   fiber_100g FLOAT NULL,
-   soluble_fiber_100g FLOAT NULL,
-   insoluble_fiber_100g FLOAT NULL,
-   proteins_100g FLOAT NULL,
-   casein_100g FLOAT NULL,
-   serum_proteins_100g FLOAT NULL,
-   nucleotides_100g FLOAT NULL,
-   salt_100g FLOAT NULL,
-   added_salt_100g FLOAT NULL,
-   sodium_100g FLOAT NULL,
-   alcohol_100g FLOAT NULL,
-   vitamin_a_100g FLOAT NULL,
-   beta_carotene_100g FLOAT NULL,
-   vitamin_d_100g FLOAT NULL,
-   vitamin_e_100g FLOAT NULL,
-   vitamin_k_100g FLOAT NULL,
-   vitamin_c_100g FLOAT NULL,
-   vitamin_b1_100g FLOAT NULL,
-   vitamin_b2_100g FLOAT NULL,
-   vitamin_pp_100g FLOAT NULL,
-   vitamin_b6_100g FLOAT NULL,
-   vitamin_b9_100g FLOAT NULL,
-   folates_100g FLOAT NULL,
-   vitamin_b12_100g FLOAT NULL,
-   biotin_100g FLOAT NULL,
-   pantothenic_acid_100g FLOAT NULL,
-   silica_100g FLOAT NULL,
-   bicarbonate_100g FLOAT NULL,
-   potassium_100g FLOAT NULL,
-   chloride_100g FLOAT NULL,
-   calcium_100g FLOAT NULL,
-   phosphorus_100g FLOAT NULL,
-   iron_100g FLOAT NULL,
-   magnesium_100g FLOAT NULL,
-   zinc_100g FLOAT NULL,
-   copper_100g FLOAT NULL,
-   manganese_100g FLOAT NULL,
-   fluoride_100g FLOAT NULL,
-   selenium_100g FLOAT NULL,
-   chromium_100g FLOAT NULL,
-   molybdenum_100g FLOAT NULL,
-   iodine_100g FLOAT NULL,
-   caffeine_100g FLOAT NULL,
-   taurine_100g FLOAT NULL,
-   ph_100g FLOAT NULL,
-   fruits_vegetables_nuts_100g FLOAT NULL,
-   fruits_vegetables_nuts_dried_100g FLOAT NULL,
-   fruits_vegetables_nuts_estimate_100g FLOAT NULL,
-   fruits_vegetables_nuts_estimate_from_ingredients_100g FLOAT NULL,
-   collagen_meat_protein_ratio_100g FLOAT NULL,
-   cocoa_100g FLOAT NULL,
-   chlorophyl_100g FLOAT NULL,
-   carbon_footprint_100g FLOAT NULL,
-   carbon_footprint_from_meat_or_fish_100g FLOAT NULL,
-   nutrition_score_fr_100g FLOAT NULL,
-   nutrition_score_uk_100g FLOAT NULL,
-   glycemic_index_100g FLOAT NULL,
-   water_hardness_100g FLOAT NULL,
-   choline_100g FLOAT NULL,
-   phylloquinone_100g FLOAT NULL,
-   beta_glucan_100g FLOAT NULL,
-   inositol_100g FLOAT NULL,
-   carnitine_100g FLOAT NULL,
-   sulphate_100g FLOAT NULL,
-   nitrate_100g FLOAT NULL,
-   acidity_100g FLOAT NULL,
-   carbohydrates_total_100g FLOAT NULL,
-   prediction FLOAT NULL
-) ENGINE=InnoDB;
+echo "Creating products table..."
+PRODUCTS_SQL=$(generate_table_sql "products" "${selected_columns[@]}")
+mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
+$PRODUCTS_SQL
 EOF
 
-  echo "Importing data..."
-  mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
+echo "Importing data..."
+LOAD_LIST=$(generate_load_list)
+SET_EXPR=$(generate_set_expr)
+
+mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
 SET SESSION sql_mode = '';
 LOAD DATA INFILE '${FULL_PATH}'
 INTO TABLE products
@@ -241,185 +114,14 @@ FIELDS TERMINATED BY '\t'
 ENCLOSED BY '"'
 LINES TERMINATED BY '\n'
 IGNORE 1 ROWS
-(
-  code, url, creator, last_modified_by, product_name, abbreviated_product_name,
-  generic_name, quantity, packaging, packaging_tags, packaging_en, packaging_text,
-  brands, brands_tags, brands_en, categories, categories_tags, categories_en,
-  origins, origins_tags, origins_en, manufacturing_places, manufacturing_places_tags,
-  labels, labels_tags, labels_en, emb_codes, emb_codes_tags, first_packaging_code_geo,
-  cities, cities_tags, purchase_places, stores, countries, countries_tags, countries_en,
-  ingredients_text, ingredients_tags, ingredients_analysis_tags, allergens, allergens_en,
-  traces, traces_tags, traces_en, serving_size, @serving_quantity, no_nutrition_data,
-  @additives_n, additives, additives_tags, @nutriscore_score, nutriscore_grade, @nova_group,
-  pnns_groups_1, pnns_groups_2, food_groups, food_groups_tags, food_groups_en, states,
-  states_tags, states_en, brand_owner, @environmental_score_score, environmental_score_grade,
-  nutrient_levels_tags, product_quantity, owner, data_quality_errors_tags, @unique_scans_n,
-  popularity_tags, @completeness, main_category, main_category_en, image_url, image_small_url,
-  image_ingredients_url, image_ingredients_small_url, image_nutrition_url, image_nutrition_small_url,
-  @energy_kj_100g, @energy_kcal_100g, @energy_100g, @energy_from_fat_100g, @fat_100g, @saturated_fat_100g,
-  @butyric_acid_100g, @caproic_acid_100g, @caprylic_acid_100g, @capric_acid_100g, @lauric_acid_100g,
-  @myristic_acid_100g, @palmitic_acid_100g, @stearic_acid_100g, @arachidic_acid_100g, @behenic_acid_100g,
-  @lignoceric_acid_100g, @cerotic_acid_100g, @montanic_acid_100g, @melissic_acid_100g, @unsaturated_fat_100g,
-  @monounsaturated_fat_100g, @omega_9_fat_100g, @polyunsaturated_fat_100g, @omega_3_fat_100g, @omega_6_fat_100g,
-  @alpha_linolenic_acid_100g, @eicosapentaenoic_acid_100g, @docosahexaenoic_acid_100g, @linoleic_acid_100g,
-  @arachidonic_acid_100g, @gamma_linolenic_acid_100g, @dihomo_gamma_linolenic_acid_100g, @oleic_acid_100g,
-  @elaidic_acid_100g, @gondoic_acid_100g, @mead_acid_100g, @erucic_acid_100g, @nervonic_acid_100g,
-  @trans_fat_100g, @cholesterol_100g, @carbohydrates_100g, @sugars_100g, @added_sugars_100g, @sucrose_100g,
-  @glucose_100g, @fructose_100g, @galactose_100g, @lactose_100g, @maltose_100g, @maltodextrins_100g,
-  @starch_100g, @polyols_100g, @erythritol_100g, @fiber_100g, @soluble_fiber_100g, @insoluble_fiber_100g,
-  @proteins_100g, @casein_100g, @serum_proteins_100g, @nucleotides_100g, @salt_100g, @added_salt_100g,
-  @sodium_100g, @alcohol_100g, @vitamin_a_100g, @beta_carotene_100g, @vitamin_d_100g, @vitamin_e_100g,
-  @vitamin_k_100g, @vitamin_c_100g, @vitamin_b1_100g, @vitamin_b2_100g, @vitamin_pp_100g, @vitamin_b6_100g,
-  @vitamin_b9_100g, @folates_100g, @vitamin_b12_100g, @biotin_100g, @pantothenic_acid_100g, @silica_100g,
-  @bicarbonate_100g, @potassium_100g, @chloride_100g, @calcium_100g, @phosphorus_100g, @iron_100g,
-  @magnesium_100g, @zinc_100g, @copper_100g, @manganese_100g, @fluoride_100g, @selenium_100g,
-  @chromium_100g, @molybdenum_100g, @iodine_100g, @caffeine_100g, @taurine_100g, @ph_100g,
-  @fruits_vegetables_nuts_100g, @fruits_vegetables_nuts_dried_100g, @fruits_vegetables_nuts_estimate_100g,
-  @fruits_vegetables_nuts_estimate_from_ingredients_100g, @collagen_meat_protein_ratio_100g, @cocoa_100g,
-  @chlorophyl_100g, @carbon_footprint_100g, @carbon_footprint_from_meat_or_fish_100g, @nutrition_score_fr_100g,
-  @nutrition_score_uk_100g, @glycemic_index_100g, @water_hardness_100g, @choline_100g, @phylloquinone_100g,
-  @beta_glucan_100g, @inositol_100g, @carnitine_100g, @sulphate_100g, @nitrate_100g, @acidity_100g,
-  @carbohydrates_total_100g, @prediction
-)
-SET
-  serving_quantity = NULLIF(@serving_quantity, ''),
-  additives_n = NULLIF(@additives_n, ''),
-  nutriscore_score = NULLIF(@nutriscore_score, ''),
-  nova_group = NULLIF(@nova_group, ''),
-  environmental_score_score = NULLIF(@environmental_score_score, ''),
-  unique_scans_n = NULLIF(@unique_scans_n, ''),
-  completeness = NULLIF(@completeness, ''),
-  energy_kj_100g = NULLIF(@energy_kj_100g, ''),
-  energy_kcal_100g = NULLIF(@energy_kcal_100g, ''),
-  energy_100g = NULLIF(@energy_100g, ''),
-  energy_from_fat_100g = NULLIF(@energy_from_fat_100g, ''),
-  fat_100g = NULLIF(@fat_100g, ''),
-  saturated_fat_100g = NULLIF(@saturated_fat_100g, ''),
-  butyric_acid_100g = NULLIF(@butyric_acid_100g, ''),
-  caproic_acid_100g = NULLIF(@caproic_acid_100g, ''),
-  caprylic_acid_100g = NULLIF(@caprylic_acid_100g, ''),
-  capric_acid_100g = NULLIF(@capric_acid_100g, ''),
-  lauric_acid_100g = NULLIF(@lauric_acid_100g, ''),
-  myristic_acid_100g = NULLIF(@myristic_acid_100g, ''),
-  palmitic_acid_100g = NULLIF(@palmitic_acid_100g, ''),
-  stearic_acid_100g = NULLIF(@stearic_acid_100g, ''),
-  arachidic_acid_100g = NULLIF(@arachidic_acid_100g, ''),
-  behenic_acid_100g = NULLIF(@behenic_acid_100g, ''),
-  lignoceric_acid_100g = NULLIF(@lignoceric_acid_100g, ''),
-  cerotic_acid_100g = NULLIF(@cerotic_acid_100g, ''),
-  montanic_acid_100g = NULLIF(@montanic_acid_100g, ''),
-  melissic_acid_100g = NULLIF(@melissic_acid_100g, ''),
-  unsaturated_fat_100g = NULLIF(@unsaturated_fat_100g, ''),
-  monounsaturated_fat_100g = NULLIF(@monounsaturated_fat_100g, ''),
-  omega_9_fat_100g = NULLIF(@omega_9_fat_100g, ''),
-  polyunsaturated_fat_100g = NULLIF(@polyunsaturated_fat_100g, ''),
-  omega_3_fat_100g = NULLIF(@omega_3_fat_100g, ''),
-  omega_6_fat_100g = NULLIF(@omega_6_fat_100g, ''),
-  alpha_linolenic_acid_100g = NULLIF(@alpha_linolenic_acid_100g, ''),
-  eicosapentaenoic_acid_100g = NULLIF(@eicosapentaenoic_acid_100g, ''),
-  docosahexaenoic_acid_100g = NULLIF(@docosahexaenoic_acid_100g, ''),
-  linoleic_acid_100g = NULLIF(@linoleic_acid_100g, ''),
-  arachidonic_acid_100g = NULLIF(@arachidonic_acid_100g, ''),
-  gamma_linolenic_acid_100g = NULLIF(@gamma_linolenic_acid_100g, ''),
-  dihomo_gamma_linolenic_acid_100g = NULLIF(@dihomo_gamma_linolenic_acid_100g, ''),
-  oleic_acid_100g = NULLIF(@oleic_acid_100g, ''),
-  elaidic_acid_100g = NULLIF(@elaidic_acid_100g, ''),
-  gondoic_acid_100g = NULLIF(@gondoic_acid_100g, ''),
-  mead_acid_100g = NULLIF(@mead_acid_100g, ''),
-  erucic_acid_100g = NULLIF(@erucic_acid_100g, ''),
-  nervonic_acid_100g = NULLIF(@nervonic_acid_100g, ''),
-  trans_fat_100g = NULLIF(@trans_fat_100g, ''),
-  cholesterol_100g = NULLIF(@cholesterol_100g, ''),
-  carbohydrates_100g = NULLIF(@carbohydrates_100g, ''),
-  sugars_100g = NULLIF(@sugars_100g, ''),
-  added_sugars_100g = NULLIF(@added_sugars_100g, ''),
-  sucrose_100g = NULLIF(@sucrose_100g, ''),
-  glucose_100g = NULLIF(@glucose_100g, ''),
-  fructose_100g = NULLIF(@fructose_100g, ''),
-  galactose_100g = NULLIF(@galactose_100g, ''),
-  lactose_100g = NULLIF(@lactose_100g, ''),
-  maltose_100g = NULLIF(@maltose_100g, ''),
-  maltodextrins_100g = NULLIF(@maltodextrins_100g, ''),
-  starch_100g = NULLIF(@starch_100g, ''),
-  polyols_100g = NULLIF(@polyols_100g, ''),
-  erythritol_100g = NULLIF(@erythritol_100g, ''),
-  fiber_100g = NULLIF(@fiber_100g, ''),
-  soluble_fiber_100g = NULLIF(@soluble_fiber_100g, ''),
-  insoluble_fiber_100g = NULLIF(@insoluble_fiber_100g, ''),
-  proteins_100g = NULLIF(@proteins_100g, ''),
-  casein_100g = NULLIF(@casein_100g, ''),
-  serum_proteins_100g = NULLIF(@serum_proteins_100g, ''),
-  nucleotides_100g = NULLIF(@nucleotides_100g, ''),
-  salt_100g = NULLIF(@salt_100g, ''),
-  added_salt_100g = NULLIF(@added_salt_100g, ''),
-  sodium_100g = NULLIF(@sodium_100g, ''),
-  alcohol_100g = NULLIF(@alcohol_100g, ''),
-  vitamin_a_100g = NULLIF(@vitamin_a_100g, ''),
-  beta_carotene_100g = NULLIF(@beta_carotene_100g, ''),
-  vitamin_d_100g = NULLIF(@vitamin_d_100g, ''),
-  vitamin_e_100g = NULLIF(@vitamin_e_100g, ''),
-  vitamin_k_100g = NULLIF(@vitamin_k_100g, ''),
-  vitamin_c_100g = NULLIF(@vitamin_c_100g, ''),
-  vitamin_b1_100g = NULLIF(@vitamin_b1_100g, ''),
-  vitamin_b2_100g = NULLIF(@vitamin_b2_100g, ''),
-  vitamin_pp_100g = NULLIF(@vitamin_pp_100g, ''),
-  vitamin_b6_100g = NULLIF(@vitamin_b6_100g, ''),
-  vitamin_b9_100g = NULLIF(@vitamin_b9_100g, ''),
-  folates_100g = NULLIF(@folates_100g, ''),
-  vitamin_b12_100g = NULLIF(@vitamin_b12_100g, ''),
-  biotin_100g = NULLIF(@biotin_100g, ''),
-  pantothenic_acid_100g = NULLIF(@pantothenic_acid_100g, ''),
-  silica_100g = NULLIF(@silica_100g, ''),
-  bicarbonate_100g = NULLIF(@bicarbonate_100g, ''),
-  potassium_100g = NULLIF(@potassium_100g, ''),
-  chloride_100g = NULLIF(@chloride_100g, ''),
-  calcium_100g = NULLIF(@calcium_100g, ''),
-  phosphorus_100g = NULLIF(@phosphorus_100g, ''),
-  iron_100g = NULLIF(@iron_100g, ''),
-  magnesium_100g = NULLIF(@magnesium_100g, ''),
-  zinc_100g = NULLIF(@zinc_100g, ''),
-  copper_100g = NULLIF(@copper_100g, ''),
-  manganese_100g = NULLIF(@manganese_100g, ''),
-  fluoride_100g = NULLIF(@fluoride_100g, ''),
-  selenium_100g = NULLIF(@selenium_100g, ''),
-  chromium_100g = NULLIF(@chromium_100g, ''),
-  molybdenum_100g = NULLIF(@molybdenum_100g, ''),
-  iodine_100g = NULLIF(@iodine_100g, ''),
-  caffeine_100g = NULLIF(@caffeine_100g, ''),
-  taurine_100g = NULLIF(@taurine_100g, ''),
-  ph_100g = NULLIF(@ph_100g, ''),
-  fruits_vegetables_nuts_100g = NULLIF(@fruits_vegetables_nuts_100g, ''),
-  fruits_vegetables_nuts_dried_100g = NULLIF(@fruits_vegetables_nuts_dried_100g, ''),
-  fruits_vegetables_nuts_estimate_100g = NULLIF(@fruits_vegetables_nuts_estimate_100g, ''),
-  fruits_vegetables_nuts_estimate_from_ingredients_100g = NULLIF(@fruits_vegetables_nuts_estimate_from_ingredients_100g, ''),
-  collagen_meat_protein_ratio_100g = NULLIF(@collagen_meat_protein_ratio_100g, ''),
-  cocoa_100g = NULLIF(@cocoa_100g, ''),
-  chlorophyl_100g = NULLIF(@chlorophyl_100g, ''),
-  carbon_footprint_100g = NULLIF(@carbon_footprint_100g, ''),
-  carbon_footprint_from_meat_or_fish_100g = NULLIF(@carbon_footprint_from_meat_or_fish_100g, ''),
-  nutrition_score_fr_100g = NULLIF(@nutrition_score_fr_100g, ''),
-  nutrition_score_uk_100g = NULLIF(@nutrition_score_uk_100g, ''),
-  glycemic_index_100g = NULLIF(@glycemic_index_100g, ''),
-  water_hardness_100g = NULLIF(@water_hardness_100g, ''),
-  choline_100g = NULLIF(@choline_100g, ''),
-  phylloquinone_100g = NULLIF(@phylloquinone_100g, ''),
-  beta_glucan_100g = NULLIF(@beta_glucan_100g, ''),
-  inositol_100g = NULLIF(@inositol_100g, ''),
-  carnitine_100g = NULLIF(@carnitine_100g, ''),
-  sulphate_100g = NULLIF(@sulphate_100g, ''),
-  nitrate_100g = NULLIF(@nitrate_100g, ''),
-  acidity_100g = NULLIF(@acidity_100g, ''),
-  carbohydrates_total_100g = NULLIF(@carbohydrates_total_100g, ''),
-  prediction = NULLIF(@prediction, '');
+($LOAD_LIST)
+SET $SET_EXPR;
 EOF
 
-  echo "Creating predicts table..."
-  mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
-CREATE TABLE IF NOT EXISTS predicts LIKE products;
+echo "Creating predicts table..."
+PREDICT_SQL=$(generate_table_sql "predicts" "${selected_columns[@]}" "prediction")
+mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
+$PREDICT_SQL
 EOF
 
-
-  echo "Initialization completed!"
-}
-
-main "$@"
+echo "Initialization completed!"

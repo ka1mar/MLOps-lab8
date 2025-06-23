@@ -16,6 +16,7 @@ else
     -e "s/\${MYSQL_USER}/$MYSQL_USER/g" \
     -e "s/\${MYSQL_PASSWORD}/$MYSQL_PASSWORD/g" \
     -e "s/\${FILE_NAME}/$FILE_NAME/g" \
+    -e "s/\${SELECTED_COLUMNS}/$SELECTED_COLUMNS/g" \
     -e "s/\${SPARK_DAEMON_MEMORY}/$SPARK_DAEMON_MEMORY/g" \
     -e "s/\${SPARK_DRIVER_MEMORY}/$SPARK_DRIVER_MEMORY/g" \
     -e "s/\${SPARK_WORKER_CORES}/$SPARK_WORKER_CORES/g" \
