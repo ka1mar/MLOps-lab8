@@ -12,14 +12,14 @@ SELECTED_COLUMNS="${SELECTED_COLUMNS}"
 
 # Проверяем наличие SELECTED_COLUMNS
 if [ -z "$SELECTED_COLUMNS" ]; then
-    echo "ERROR: SELECTED_COLUMNS environment variable is not set." >&2
-    exit 1
+   echo "ERROR: SELECTED_COLUMNS environment variable is not set." >&2
+   exit 1
 fi
 
 # Читаем заголовок из CSV-файла
 if [ ! -f "$FULL_PATH" ]; then
-    echo "ERROR: CSV file $FULL_PATH not found." >&2
-    exit 1
+   echo "ERROR: CSV file $FULL_PATH not found." >&2
+   exit 1
 fi
 
 # Получаем заголовок файла
@@ -29,8 +29,8 @@ IFS=$'\t' read -r -a ALL_COLUMNS <<< "$HEADER"
 # Создаем массив с безопасными именами колонок (заменяем дефисы на подчеркивания)
 SAFE_COLUMNS=()
 for col in "${ALL_COLUMNS[@]}"; do
-    safe_col=$(echo "$col" | tr '-' '_')
-    SAFE_COLUMNS+=("$safe_col")
+   safe_col=$(echo "$col" | tr '-' '_')
+   SAFE_COLUMNS+=("$safe_col")
 done
 
 # Обрабатываем выбранные колонки
@@ -40,51 +40,51 @@ selected_columns=($(printf "%s\n" "${selected_columns[@]}" | sort -u))
 
 # Функция для экранирования имен колонок
 escape_column() {
-    echo "\`$1\`"
+   echo "\`$1\`"
 }
 
 # Генерируем SQL для создания таблиц
 generate_table_sql() {
-    local table_name=$1
-    local columns=("${@:2}")
-    
-    if [ ${#columns[@]} -eq 0 ]; then
-        echo "ERROR: No columns defined for table $table_name" >&2
-        exit 1
-    fi
-    
-    local sql="CREATE TABLE IF NOT EXISTS ${table_name} ("
-    for col in "${columns[@]}"; do
-        if [ "$col" == "code" ]; then
-            sql+="$(escape_column "$col") VARCHAR(255)"
-        else
-            sql+="$(escape_column "$col") FLOAT"
-        fi
-        sql+=", "
-    done
-    sql="${sql%, });"
-    echo "$sql"
+   local table_name=$1
+   local columns=("${@:2}")
+  
+   if [ ${#columns[@]} -eq 0 ]; then
+       echo "ERROR: No columns defined for table $table_name" >&2
+       exit 1
+   fi
+  
+   local sql="CREATE TABLE IF NOT EXISTS ${table_name} ("
+   for col in "${columns[@]}"; do
+       if [ "$col" == "code" ]; then
+           sql+="$(escape_column "$col") VARCHAR(255)"
+       else
+           sql+="$(escape_column "$col") FLOAT"
+       fi
+       sql+=", "
+   done
+   sql="${sql%, });"
+   echo "$sql"
 }
 
 # Генерируем список колонок для LOAD DATA
 generate_load_list() {
-    local load_list=""
-    for safe_col in "${SAFE_COLUMNS[@]}"; do
-        load_list+="@${safe_col}, "
-    done
-    echo "${load_list%, }"
+   local load_list=""
+   for safe_col in "${SAFE_COLUMNS[@]}"; do
+       load_list+="@${safe_col}, "
+   done
+   echo "${load_list%, }"
 }
 
 # Генерируем SET-выражения для преобразования данных
 generate_set_expr() {
-    local set_expr=""
-    for col in "${selected_columns[@]}"; do
-        # Преобразуем имя колонки для SET (заменяем дефисы на подчеркивания)
-        safe_col=$(echo "$col" | tr '-' '_')
-        escaped_col=$(escape_column "$col")
-        set_expr+="$escaped_col = NULLIF(@${safe_col}, ''), "
-    done
-    echo "${set_expr%, }"
+   local set_expr=""
+   for col in "${selected_columns[@]}"; do
+       # Преобразуем имя колонки для SET (заменяем дефисы на подчеркивания)
+       safe_col=$(echo "$col" | tr '-' '_')
+       escaped_col=$(escape_column "$col")
+       set_expr+="$escaped_col = NULLIF(@${safe_col}, ''), "
+   done
+   echo "${set_expr%, }"
 }
 
 echo "Creating database and user..."
@@ -118,10 +118,56 @@ IGNORE 1 ROWS
 SET $SET_EXPR;
 EOF
 
+# ====== НОВЫЙ КОД: ВЫВОД СТАТИСТИКИ ПО КОЛОНКАМ ======
+echo -e "\n=== Статистика по колонкам таблицы products ==="
+
+# Получаем общее количество записей
+total_rows=$(mysql -N -s -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts -e "SELECT COUNT(*) FROM products;")
+echo "Общее количество записей: $total_rows"
+
+# Для каждой числовой колонки выводим статистику
+for col in "${selected_columns[@]}"; do
+    if [ "$col" == "code" ]; then
+        continue
+    fi
+    
+    escaped_col=$(escape_column "$col")
+    
+    # Получаем статистику по колонке
+    stats=$(mysql -N -s -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
+SELECT 
+    COUNT($escaped_col) AS count,
+    AVG($escaped_col) AS avg,
+    MIN($escaped_col) AS min,
+    MAX($escaped_col) AS max,
+    COUNT(CASE WHEN $escaped_col IS NULL THEN 1 END) AS nulls
+FROM products;
+EOF
+    )
+    
+    # Разбираем результат
+    IFS=$'\t' read -r count avg min max nulls <<< "$stats"
+    
+    # Рассчитываем процент пропущенных значений
+    null_percent=$(awk -v nulls="$nulls" -v total="$total_rows" 'BEGIN { printf "%.2f", (nulls/total)*100 }')
+    
+    # Форматируем вывод
+    echo -e "\nКолонка: $col"
+    echo "  Заполненных значений: $count"
+    echo "  Пропущенных значений: $nulls ($null_percent%)"
+    echo "  Среднее значение: $(printf "%.2f" "$avg")"
+    echo "  Минимальное значение: $min"
+    echo "  Максимальное значение: $max"
+done
+
+# ====== КОНЕЦ НОВОГО КОДА ======
+
 echo "Creating predicts table..."
 PREDICT_SQL=$(generate_table_sql "predicts" "${selected_columns[@]}" "prediction")
 mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
 $PREDICT_SQL
 EOF
 
-echo "Initialization completed!"
+echo -e "\nInitialization completed!"
+
+

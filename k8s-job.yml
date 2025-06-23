@@ -1,0 +1,88 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clustering-job
+  namespace: foodfacts
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      containers:
+      - name: clustering-app
+        image: ka1mar/clustering-app:v1
+        env:
+          - name: HOME
+            value: /tmp
+          - name: SPARK_LOCAL_DIR
+            value: /tmp
+          - name: MYSQL_URL
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: MYSQL_URL
+          - name: MYSQL_USER
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_USER
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_PASSWORD
+          - name: SPARK_DRIVER_MEMORY
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_DRIVER_MEMORY
+          - name: SPARK_EXECUTOR_MEMORY
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_EXECUTOR_MEMORY
+          - name: SPARK_EXECUTOR_CORES
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_EXECUTOR_CORES
+          - name: SPARK_DEFAULT_PARALLELISM
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_DEFAULT_PARALLELISM
+          - name: SPARK_SQL_SHUFFLE_PARTITIONS
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_SQL_SHUFFLE_PARTITIONS
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            chmod +x /app/scripts/clustering.py
+            spark-submit \
+            --master spark://spark-master:7077 \
+            --jars /app/jars/datamart.jar,/app/jars/mysql-connector-java-8.0.33.jar \
+            --packages com.mysql:mysql-connector-j:8.0.33 \
+            --conf spark.local.dir=/tmp \
+            --conf spark.jars.ivy=/tmp/.ivy \
+            /app/scripts/clustering.py \
+            --input_table products \
+            --output_table predicts \
+            -o /app/data/cluster_results \
+            --max_missing 0.3 \
+            --min_unique 0.001 \
+            -v
+      restartPolicy: Never
+
+
+      # spark-submit
+      # --jars /app/jars/datamart.jar,/app/jars/mysql-connector-java-8.0.33.jar \
+      # --packages com.mysql:mysql-connector-j:8.0.33 \
+      # --master spark://spark-master:7077
+      # /app/scripts/clustering.py
+      # --input_table products
+      # --output_table predicts
+      # -o /app/data/cluster_results
+      # --max_missing 0.3
+      # --min_unique 0.001

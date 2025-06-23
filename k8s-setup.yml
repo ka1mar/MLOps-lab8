@@ -1,12 +1,4 @@
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: foodfacts
-
----
-
-# MySQL Service
-apiVersion: v1
 kind: Service
 metadata:
   name: mysql
@@ -17,10 +9,7 @@ spec:
   ports:
     - port: 3306
       targetPort: 3306
-
 ---
-
-# MySQL Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,24 +29,45 @@ spec:
       - name: mysql
         image: mysql:8.0
         env:
-        - name: MYSQL_ROOT_PASSWORD
-          value: "${MYSQL_ROOT_PASSWORD}"
-        - name: MYSQL_DATABASE
-          value: "${MYSQL_DATABASE}"
-        - name: MYSQL_USER
-          value: "${MYSQL_USER}"
-        - name: MYSQL_PASSWORD
-          value: "${MYSQL_PASSWORD}"
-        - name: FILE_NAME
-          value: "${FILE_NAME}"
-        - name: SELECTED_COLUMNS
-          value: "${SELECTED_COLUMNS}"
-
+          - name: MYSQL_ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_ROOT_PASSWORD
+          - name: MYSQL_DATABASE
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: MYSQL_DATABASE
+          - name: MYSQL_USER
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_USER
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_PASSWORD
+          - name: FILE_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: FILE_NAME
+          - name: SELECTED_COLUMNS
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SELECTED_COLUMNS
         readinessProbe:
           exec:
-            command: ["mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-          initialDelaySeconds: 10
-          periodSeconds: 5
+            command:
+              - sh
+              - -c
+              - "mysqladmin ping -uroot -p\"$MYSQL_ROOT_PASSWORD\""
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
         ports:
         - containerPort: 3306
         volumeMounts:
@@ -67,11 +77,26 @@ spec:
       - name: data-volume
         hostPath:
           path: /Users/anmilka/mlops/MLOps-lab8/data
-          type: DirectoryOrCreate
-
+          type: Directory
 ---
-
-# Spark Master
+# Spark Master Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-master
+  namespace: foodfacts
+spec:
+  selector:
+    app: spark-master
+  ports:
+    - name: spark
+      port: 7077
+      targetPort: 7077
+    - name: webui
+      port: 8080
+      targetPort: 8080
+---
+# Spark Master Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -91,19 +116,32 @@ spec:
       - name: spark-master
         image: bitnami/spark:3.5.1
         env:
-        - name: SPARK_MODE
-          value: "master"
-        - name: SPARK_DAEMON_MEMORY
-          value: "${SPARK_DAEMON_MEMORY}"
-        - name: SPARK_DRIVER_MEMORY
-          value: "${SPARK_DRIVER_MEMORY}"
+          - name: SPARK_MODE
+            value: master
+          - name: SPARK_DAEMON_MEMORY
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_DAEMON_MEMORY
+          - name: SPARK_DRIVER_MEMORY
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_DRIVER_MEMORY
+          # Явно указываем порт и хост
+          - name: SPARK_MASTER_PORT
+            value: "7077"
+          - name: SPARK_MASTER_WEBUI_PORT
+            value: "8080"
+          - name: SPARK_LOCAL_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
         ports:
         - containerPort: 7077
         - containerPort: 8080
-
 ---
-
-# Spark Worker
+# Spark Worker Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -123,51 +161,27 @@ spec:
       - name: spark-worker
         image: bitnami/spark:3.5.1
         env:
-        - name: SPARK_MODE
-          value: "worker"
-        - name: SPARK_MASTER_URL
-          value: "spark://spark-master:7077"
-        - name: SPARK_WORKER_CORES
-          value: "${SPARK_WORKER_CORES}"
-        - name: SPARK_WORKER_MEMORY
-          value: "${SPARK_WORKER_MEMORY}"
+          - name: SPARK_MODE
+            value: worker
+          - name: SPARK_MASTER_URL
+            value: spark://spark-master:7077
+          - name: SPARK_WORKER_CORES
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_WORKER_CORES
+          - name: SPARK_WORKER_MEMORY
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_WORKER_MEMORY
+          - name: SPARK_DAEMON_MEMORY
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: SPARK_DAEMON_MEMORY
+          # Для отладки
+          - name: SPARK_LOG_LEVEL
+            value: "DEBUG"
 
----
 
-# Clustering Job
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: clustering-job
-  namespace: foodfacts
-spec:
-  backoffLimit: 0
-  ttlSecondsAfterFinished: 60
-  activeDeadlineSeconds: 300
-  template:
-    spec:
-      containers:
-      - name: clustering-app
-        image: ka1mar/clustering-app:v1
-        env:
-        - name: MYSQL_URL
-          value: "jdbc:mysql://mysql:3306/${MYSQL_DATABASE}"
-        - name: MYSQL_USER
-          value: "${MYSQL_USER}"
-        - name: MYSQL_PASSWORD
-          value: "${MYSQL_PASSWORD}"
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            spark-submit \
-            --master spark://spark-master:7077 \
-            --driver-memory ${SPARK_DRIVER_MEMORY} \
-            --executor-memory ${SPARK_EXECUTOR_MEMORY} \
-            /app/scripts/clustering.py \
-            --input_table products \
-            --output_table predicts \
-            -o /app/data/cluster_results \
-            --max_missing 0.3 \
-            --min_unique 0.001 \
-            -v
-      restartPolicy: Never
