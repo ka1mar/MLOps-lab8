@@ -15,7 +15,7 @@ spec:
         image: ka1mar/clustering-app:v1
         env:
           - name: HADOOP_USER_NAME
-            value: sparkuser  # Matches created user
+            value: sparkuser 
           - name: HADOOP_HOME
             value: /home/sparkuser
           - name: SPARK_HOME
@@ -64,6 +64,13 @@ spec:
               configMapKeyRef:
                 name: app-config
                 key: SPARK_SQL_SHUFFLE_PARTITIONS
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
         command: ["/bin/sh", "-c"]
         args:
           - |

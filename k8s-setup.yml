@@ -123,11 +123,11 @@ spec:
               configMapKeyRef:
                 name: app-config
                 key: SPARK_DAEMON_MEMORY
-          - name: SPARK_DRIVER_MEMORY
-            valueFrom:
-              configMapKeyRef:
-                name: app-config
-                key: SPARK_DRIVER_MEMORY
+          # - name: SPARK_DRIVER_MEMORY
+          #   valueFrom:
+          #     configMapKeyRef:
+          #       name: app-config
+          #       key: SPARK_DRIVER_MEMORY
           - name: SPARK_MASTER_PORT
             value: "7077"
           - name: SPARK_MASTER_WEBUI_PORT
@@ -136,6 +136,13 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: status.podIP
+        resources:
+          requests:
+            memory: "5Gi"
+            cpu: "2"
+          limits:
+            memory: "5Gi"
+            cpu: "2"
         ports:
         - containerPort: 7077
         - containerPort: 8080
@@ -174,12 +181,19 @@ spec:
               configMapKeyRef:
                 name: app-config
                 key: SPARK_WORKER_MEMORY
-          - name: SPARK_DAEMON_MEMORY
-            valueFrom:
-              configMapKeyRef:
-                name: app-config
-                key: SPARK_DAEMON_MEMORY
+          # - name: SPARK_DAEMON_MEMORY
+          #   valueFrom:
+          #     configMapKeyRef:
+          #       name: app-config
+          #       key: SPARK_DAEMON_MEMORY
           - name: SPARK_LOG_LEVEL
             value: "DEBUG"
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
 
 
