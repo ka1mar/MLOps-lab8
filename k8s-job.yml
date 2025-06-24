@@ -8,12 +8,20 @@ spec:
   ttlSecondsAfterFinished: 3600
   template:
     spec:
+      securityContext:
+        runAsUser: 1001
       containers:
       - name: clustering-app
         image: ka1mar/clustering-app:v1
         env:
+          - name: HADOOP_USER_NAME
+            value: sparkuser  # Matches created user
+          - name: HADOOP_HOME
+            value: /home/sparkuser
+          - name: SPARK_HOME
+            value: /opt/bitnami/spark
           - name: HOME
-            value: /tmp
+            value: /home/sparkuser
           - name: SPARK_LOCAL_DIR
             value: /tmp
           - name: MYSQL_URL
@@ -76,13 +84,3 @@ spec:
       restartPolicy: Never
 
 
-      # spark-submit
-      # --jars /app/jars/datamart.jar,/app/jars/mysql-connector-java-8.0.33.jar \
-      # --packages com.mysql:mysql-connector-j:8.0.33 \
-      # --master spark://spark-master:7077
-      # /app/scripts/clustering.py
-      # --input_table products
-      # --output_table predicts
-      # -o /app/data/cluster_results
-      # --max_missing 0.3
-      # --min_unique 0.001

@@ -76,7 +76,7 @@ spec:
       volumes:
       - name: data-volume
         hostPath:
-          path: /Users/anmilka/mlops/MLOps-lab8/data
+          path: /host_mnt/Users/anmilka/mlops/MLOps-lab8/data
           type: Directory
 ---
 # Spark Master Service
@@ -128,7 +128,6 @@ spec:
               configMapKeyRef:
                 name: app-config
                 key: SPARK_DRIVER_MEMORY
-          # Явно указываем порт и хост
           - name: SPARK_MASTER_PORT
             value: "7077"
           - name: SPARK_MASTER_WEBUI_PORT
@@ -180,7 +179,6 @@ spec:
               configMapKeyRef:
                 name: app-config
                 key: SPARK_DAEMON_MEMORY
-          # Для отладки
           - name: SPARK_LOG_LEVEL
             value: "DEBUG"
 

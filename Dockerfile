@@ -1,6 +1,7 @@
 FROM bitnami/spark:3.5.1
 
 USER root
+RUN useradd -m -u 1001 sparkuser
 
 # Install specific Scala version
 ENV SCALA_VERSION=2.12.18

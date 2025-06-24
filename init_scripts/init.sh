@@ -118,49 +118,6 @@ IGNORE 1 ROWS
 SET $SET_EXPR;
 EOF
 
-# ====== НОВЫЙ КОД: ВЫВОД СТАТИСТИКИ ПО КОЛОНКАМ ======
-echo -e "\n=== Статистика по колонкам таблицы products ==="
-
-# Получаем общее количество записей
-total_rows=$(mysql -N -s -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts -e "SELECT COUNT(*) FROM products;")
-echo "Общее количество записей: $total_rows"
-
-# Для каждой числовой колонки выводим статистику
-for col in "${selected_columns[@]}"; do
-    if [ "$col" == "code" ]; then
-        continue
-    fi
-    
-    escaped_col=$(escape_column "$col")
-    
-    # Получаем статистику по колонке
-    stats=$(mysql -N -s -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" foodfacts <<EOF
-SELECT 
-    COUNT($escaped_col) AS count,
-    AVG($escaped_col) AS avg,
-    MIN($escaped_col) AS min,
-    MAX($escaped_col) AS max,
-    COUNT(CASE WHEN $escaped_col IS NULL THEN 1 END) AS nulls
-FROM products;
-EOF
-    )
-    
-    # Разбираем результат
-    IFS=$'\t' read -r count avg min max nulls <<< "$stats"
-    
-    # Рассчитываем процент пропущенных значений
-    null_percent=$(awk -v nulls="$nulls" -v total="$total_rows" 'BEGIN { printf "%.2f", (nulls/total)*100 }')
-    
-    # Форматируем вывод
-    echo -e "\nКолонка: $col"
-    echo "  Заполненных значений: $count"
-    echo "  Пропущенных значений: $nulls ($null_percent%)"
-    echo "  Среднее значение: $(printf "%.2f" "$avg")"
-    echo "  Минимальное значение: $min"
-    echo "  Максимальное значение: $max"
-done
-
-# ====== КОНЕЦ НОВОГО КОДА ======
 
 echo "Creating predicts table..."
 PREDICT_SQL=$(generate_table_sql "predicts" "${selected_columns[@]}" "prediction")

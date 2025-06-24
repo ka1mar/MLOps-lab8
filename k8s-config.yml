@@ -10,7 +10,7 @@ metadata:
   namespace: foodfacts
 data:
   MYSQL_DATABASE: foodfacts
-  FILE_NAME: en.openfoodfacts.org.products.small.csv
+  FILE_NAME: en.openfoodfacts.org.products.small.small.csv
   SELECTED_COLUMNS: energy_100g proteins_100g carbohydrates_100g fat_100g energy-kcal_100g sugars_100g saturated-fat_100g salt_100g sodium_100g
   SPARK_DAEMON_MEMORY: 4g
   SPARK_DRIVER_MEMORY: 2g
