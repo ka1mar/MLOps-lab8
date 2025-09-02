@@ -4,15 +4,34 @@ metadata:
   name: clustering-job
   namespace: foodfacts
 spec:
-  backoffLimit: 0
+  backoffLimit: 3
   ttlSecondsAfterFinished: 3600
   template:
     spec:
       securityContext:
         runAsUser: 1001
+      initContainers:
+      - name: wait-for-mysql-data
+        image: mysql:8.0
+        env:
+          - name: MYSQL_ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_ROOT_PASSWORD
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Waiting for MySQL to be ready with data..."
+          until mysql -h mysql -u root -p"$MYSQL_ROOT_PASSWORD" -D foodfacts -e "SELECT COUNT(*) FROM products LIMIT 1" 2>/dev/null; do
+            echo "MySQL or data not ready, waiting..."
+            sleep 10
+          done
+          echo "MySQL is ready with data!"
       containers:
       - name: clustering-app
-        image: ka1mar/clustering-app:v1
+        image: clustering-app:latest
+        imagePullPolicy: Never
         env:
           - name: HADOOP_USER_NAME
             value: sparkuser 
@@ -64,23 +83,28 @@ spec:
               configMapKeyRef:
                 name: app-config
                 key: SPARK_SQL_SHUFFLE_PARTITIONS
+        volumeMounts:
+        - name: data-volume
+          mountPath: /app/data
         resources:
           requests:
-            memory: "2Gi"
-            cpu: "1"
+            memory: "1Gi"
+            cpu: "500m"
           limits:
-            memory: "2Gi"
+            memory: "1.5Gi"
             cpu: "1"
         command: ["/bin/sh", "-c"]
         args:
           - |
             chmod +x /app/scripts/clustering.py
             spark-submit \
-            --master spark://spark-master:7077 \
+            --master local[*] \
             --jars /app/jars/datamart.jar,/app/jars/mysql-connector-java-8.0.33.jar \
             --packages com.mysql:mysql-connector-j:8.0.33 \
             --conf spark.local.dir=/tmp \
             --conf spark.jars.ivy=/tmp/.ivy \
+            --conf spark.executor.memory=1g \
+            --conf spark.driver.memory=1g \
             /app/scripts/clustering.py \
             --input_table products \
             --output_table predicts \
@@ -88,6 +112,10 @@ spec:
             --max_missing 0.3 \
             --min_unique 0.001 \
             -v
+      volumes:
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: app-data-pvc
       restartPolicy: Never
 
 

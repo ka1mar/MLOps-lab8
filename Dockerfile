@@ -3,15 +3,25 @@ FROM bitnami/spark:3.5.1
 USER root
 RUN useradd -m -u 1001 sparkuser
 
-# Install specific Scala version
-ENV SCALA_VERSION=2.12.18
+# Install dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
-    unzip && \
-    curl -fsL https://downloads.typesafe.com/scala/$SCALA_VERSION/scala-$SCALA_VERSION.deb -o scala.deb && \
-    apt-get install -y ./scala.deb && \
-    rm scala.deb
+    unzip \
+    default-jdk \
+    wget && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Scala manually
+ENV SCALA_VERSION=2.12.18
+ENV SCALA_HOME=/usr/share/scala
+RUN wget -q https://downloads.lightbend.com/scala/${SCALA_VERSION}/scala-${SCALA_VERSION}.tgz && \
+    tar -xzf scala-${SCALA_VERSION}.tgz && \
+    mkdir -p ${SCALA_HOME} && \
+    mv scala-${SCALA_VERSION}/* ${SCALA_HOME}/ && \
+    rm -rf scala-${SCALA_VERSION} scala-${SCALA_VERSION}.tgz && \
+    ln -s ${SCALA_HOME}/bin/scala /usr/local/bin/scala && \
+    ln -s ${SCALA_HOME}/bin/scalac /usr/local/bin/scalac
 
 # Download MySQL connector with correct coordinates
 RUN mkdir -p /app/jars && \
