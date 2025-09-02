@@ -88,11 +88,11 @@ spec:
           mountPath: /app/data
         resources:
           requests:
-            memory: "1Gi"
-            cpu: "500m"
-          limits:
-            memory: "1.5Gi"
+            memory: "2Gi"
             cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -103,8 +103,8 @@ spec:
             --packages com.mysql:mysql-connector-j:8.0.33 \
             --conf spark.local.dir=/tmp \
             --conf spark.jars.ivy=/tmp/.ivy \
-            --conf spark.executor.memory=1g \
-            --conf spark.driver.memory=1g \
+            --conf spark.executor.memory=2g \
+            --conf spark.driver.memory=2g \
             /app/scripts/clustering.py \
             --input_table products \
             --output_table predicts \

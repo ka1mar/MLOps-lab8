@@ -9,7 +9,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 5Gi
+      storage: 20Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -21,7 +21,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi
+      storage: 15Gi
 ---
 ---
 apiVersion: v1
@@ -138,7 +138,7 @@ spec:
         args:
         - |
           echo "Copying real CSV data file..."
-          cp /csv-data/en.openfoodfacts.org.products.small.csv /data/en.openfoodfacts.org.products.small.csv
+          cp /csv-data/en.openfoodfacts.org.products.csv /data/en.openfoodfacts.org.products.csv
           echo "Real CSV data copied successfully"
           ls -la /data/
           echo "Data initialization completed"
@@ -260,11 +260,11 @@ spec:
 
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "250m"
-          limits:
             memory: "1Gi"
             cpu: "500m"
+          limits:
+            memory: "3Gi"
+            cpu: "1"
         volumeMounts:
         - name: data-volume
           mountPath: /app/data

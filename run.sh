@@ -8,6 +8,15 @@ kubectl delete -f k8s-config.yml --ignore-not-found
 
 sleep 10
 
+echo "Building Docker images..."
+echo "Building data-init image..."
+docker build -f Dockerfile.data-init -t data-init:latest .
+
+echo "Building clustering-app image..."
+docker build -f Dockerfile -t clustering-app:latest .
+
+echo "Docker images built successfully!"
+
 kubectl apply -f k8s-config.yml
 kubectl apply -f k8s-setup.yml
 
